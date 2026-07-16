@@ -1,0 +1,90 @@
+[
+  {
+    "image": "20260716_170056_78e72066-638c-4096-bec9-b6cb7086fc4c.png",
+    "timestamp": "2026-07-16 17:00:57",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 92.6,
+        "conf_class": "high-conf"
+      },
+      {
+        "name": "cay",
+        "confidence": 81.8,
+        "conf_class": "high-conf"
+      }
+    ]
+  },
+  {
+    "image": "20260716_170102_78e72066-638c-4096-bec9-b6cb7086fc4c.png",
+    "timestamp": "2026-07-16 17:01:02",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 92.6,
+        "conf_class": "high-conf"
+      },
+      {
+        "name": "cay",
+        "confidence": 81.8,
+        "conf_class": "high-conf"
+      }
+    ]
+  },
+  {
+    "image": "20260716_170109_e04897e7-8b82-4183-bc6f-736cf5c6d789.png",
+    "timestamp": "2026-07-16 17:01:09",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 86.5,
+        "conf_class": "high-conf"
+      }
+    ]
+  },
+  {
+    "image": "20260716_170904_e04897e7-8b82-4183-bc6f-736cf5c6d789.png",
+    "timestamp": "2026-07-16 17:09:04",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 86.5,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 10.0,
+          "y1": 553.3,
+          "x2": 664.0,
+          "y2": 1115.1
+        }
+      }
+    ]
+  },
+  {
+    "image": "20260716_170920_78e72066-638c-4096-bec9-b6cb7086fc4c.png",
+    "timestamp": "2026-07-16 17:09:21",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 92.6,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 430.9,
+          "y1": 259.7,
+          "x2": 1432.0,
+          "y2": 975.5
+        }
+      },
+      {
+        "name": "cay",
+        "confidence": 81.8,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 89.4,
+          "y1": 119.1,
+          "x2": 475.4,
+          "y2": 664.2
+        }
+      }
+    ]
+  }
+]
