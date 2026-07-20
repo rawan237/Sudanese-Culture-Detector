@@ -5,3 +5,5 @@ jinja2
 ultralytics
 opencv-python
 numpy
+passlib
+bcrypt==4.0.1

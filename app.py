@@ -24,8 +24,6 @@ USERS_FILE = 'users.json'
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# ---------- USER DATABASE HELPERS ----------
-
 def load_users():
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -39,8 +37,7 @@ def save_users(users):
 
 
 def find_user(username):
-    users = load_users()
-    for u in users:
+    for u in load_users():
         if u['username'] == username:
             return u
     return None
@@ -94,34 +91,97 @@ def run_detection(model, img):
     return annotated_img, detections
 
 
-# ---------- PAGES ----------
+# ---------- SHARED STYLE: EARTHY / SUDANESE THEME ----------
+
+BASE_STYLE = """
+:root {
+  --sand: #f2e6d3;
+  --sand-dark: #e6d3b3;
+  --clay: #b5652d;
+  --clay-dark: #8a4a1f;
+  --coffee: #4a3222;
+  --coffee-light: #6b4a35;
+  --gold: #c9932f;
+}
+body {
+  font-family: 'Georgia', 'Amiri', serif;
+  background: var(--sand);
+  color: var(--coffee);
+  margin: 0;
+}
+"""
+
+PATTERN_BG = """
+background-image:
+  radial-gradient(circle at 20% 20%, rgba(181,101,45,0.08) 0, transparent 40%),
+  radial-gradient(circle at 80% 80%, rgba(201,147,47,0.10) 0, transparent 40%),
+  repeating-linear-gradient(45deg, rgba(74,50,34,0.04) 0 2px, transparent 2px 26px),
+  repeating-linear-gradient(-45deg, rgba(74,50,34,0.04) 0 2px, transparent 2px 26px);
+"""
+
+
+# ---------- LOGIN PAGE ----------
 
 LOGIN_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>Login</title>
+<title>SudanScan- Login</title>
 <style>
-  body { font-family: Arial; background: #121212; color: #eee; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-  .box { background: #1e1e1e; padding: 30px; border-radius: 12px; width: 280px; }
-  h2 { text-align: center; margin-top: 0; }
-  input { width: 100%; padding: 10px; margin: 8px 0; border-radius: 8px; border: 1px solid #444; background: #2a2a2a; color: #eee; box-sizing: border-box; }
-  button { width: 100%; padding: 10px; margin-top: 10px; background: #4ade80; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
-  .error { color: #f87171; text-align: center; font-size: 13px; }
-  .link { text-align: center; margin-top: 14px; font-size: 13px; }
-  .link a { color: #4ade80; text-decoration: none; }
+""" + BASE_STYLE + """
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  """ + PATTERN_BG + """
+}
+.card {
+  background: #fffaf2;
+  border: 1px solid var(--sand-dark);
+  border-top: 4px solid var(--clay);
+  border-radius: 14px;
+  padding: 36px 32px;
+  width: 300px;
+  box-sizing: border-box;
+}
+.brand { text-align: center; margin-bottom: 6px; }
+.brand-icon { font-size: 30px; color: var(--clay); }
+h2 { text-align: center; margin: 6px 0 2px; font-weight: normal; color: var(--coffee); }
+.subtitle { text-align: center; color: var(--coffee-light); font-size: 13px; margin: 0 0 24px; }
+input {
+  width: 100%; padding: 11px 12px; margin: 8px 0;
+  border-radius: 8px; border: 1px solid var(--sand-dark);
+  background: #fff; color: var(--coffee); box-sizing: border-box;
+  font-family: inherit; font-size: 14px;
+}
+input:focus { outline: none; border-color: var(--clay); }
+button {
+  width: 100%; padding: 11px; margin-top: 12px;
+  background: var(--clay); color: #fff; border: none;
+  border-radius: 8px; font-size: 14px; cursor: pointer;
+  font-family: inherit;
+}
+button:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+.link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
+.link a { color: var(--clay); text-decoration: none; }
 </style>
 </head>
 <body>
-<div class="box">
-  <h2>Login</h2>
-  <form method="post" action="/login">
-    <input type="text" name="username" placeholder="Username" required>
-    <input type="password" name="password" placeholder="Password" required>
-    <button type="submit">Login</button>
-  </form>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <p class="link">Don't have an account? <a href="/signup">Create one</a></p>
+<div class="hero">
+  <div class="card">
+    <div class="brand"><i class="ti ti-viewfinder brand-icon"></i></div>
+    <h2>Sudan Vision</h2>
+    <p class="subtitle">Sudanese Food & Cloth Detection System</p>
+    <form method="post" action="/login">
+      <input type="text" name="username" placeholder="Username" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Login</button>
+    </form>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <p class="link">Don't have an account? <a href="/signup">Create one</a></p>
+  </div>
 </div>
 </body>
 </html>
@@ -131,28 +191,45 @@ SIGNUP_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>Sign up</title>
+<title>SudanScan - Sign up</title>
 <style>
-  body { font-family: Arial; background: #121212; color: #eee; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-  .box { background: #1e1e1e; padding: 30px; border-radius: 12px; width: 280px; }
-  h2 { text-align: center; margin-top: 0; }
-  input { width: 100%; padding: 10px; margin: 8px 0; border-radius: 8px; border: 1px solid #444; background: #2a2a2a; color: #eee; box-sizing: border-box; }
-  button { width: 100%; padding: 10px; margin-top: 10px; background: #4ade80; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
-  .error { color: #f87171; text-align: center; font-size: 13px; }
-  .link { text-align: center; margin-top: 14px; font-size: 13px; }
-  .link a { color: #4ade80; text-decoration: none; }
+""" + BASE_STYLE + """
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
+.card {
+  background: #fffaf2; border: 1px solid var(--sand-dark);
+  border-top: 4px solid var(--clay); border-radius: 14px;
+  padding: 36px 32px; width: 300px; box-sizing: border-box;
+}
+h2 { text-align: center; margin: 0 0 20px; font-weight: normal; color: var(--coffee); }
+input {
+  width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px;
+  border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee);
+  box-sizing: border-box; font-family: inherit; font-size: 14px;
+}
+input:focus { outline: none; border-color: var(--clay); }
+button {
+  width: 100%; padding: 11px; margin-top: 12px; background: var(--clay);
+  color: #fff; border: none; border-radius: 8px; font-size: 14px;
+  cursor: pointer; font-family: inherit;
+}
+button:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+.link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
+.link a { color: var(--clay); text-decoration: none; }
 </style>
 </head>
 <body>
-<div class="box">
-  <h2>Create account</h2>
-  <form method="post" action="/signup">
-    <input type="text" name="username" placeholder="Username" required>
-    <input type="password" name="password" placeholder="Password" required>
-    <button type="submit">Sign up</button>
-  </form>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <p class="link">Already have an account? <a href="/">Login</a></p>
+<div class="hero">
+  <div class="card">
+    <h2>Create account</h2>
+    <form method="post" action="/signup">
+      <input type="text" name="username" placeholder="Username" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign up</button>
+    </form>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <p class="link">Already have an account? <a href="/">Login</a></p>
+  </div>
 </div>
 </body>
 </html>
@@ -162,20 +239,34 @@ MENU_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>Choose Detector</title>
+<title>SudanScan- Choose detector</title>
 <style>
-  body { font-family: Arial; background: #121212; color: #eee; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-  .box { text-align: center; }
-  h2 { margin-bottom: 24px; }
-  a.card { display: inline-block; background: #1e1e1e; border: 1px solid #333; border-radius: 12px; padding: 30px 40px; margin: 10px; color: #eee; text-decoration: none; width: 160px; }
-  a.card:hover { border-color: #4ade80; }
+""" + BASE_STYLE + """
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.wrap { text-align: center; }
+h2 { font-weight: normal; margin-bottom: 6px; color: var(--coffee); }
+.subtitle { color: var(--coffee-light); font-size: 13px; margin: 0 0 28px; }
+.cards { display: flex; gap: 16px; justify-content: center; }
+a.card {
+  display: block; background: #fffaf2; border: 1px solid var(--sand-dark);
+  border-radius: 14px; padding: 32px 40px; text-decoration: none;
+  color: var(--coffee); width: 150px; transition: border-color 0.15s;
+}
+a.card:hover { border-color: var(--clay); }
+a.card i { font-size: 26px; color: var(--clay); }
+a.card p { margin: 12px 0 0; font-size: 14px; }
 </style>
 </head>
 <body>
-<div class="box">
-  <h2>Choose a detector</h2>
-  <a class="card" href="/food">Food Detector</a>
-  <a class="card" href="/cloth">Cloth Detector</a>
+<div class="hero">
+  <div class="wrap">
+    <h2>Choose a detector</h2>
+    <p class="subtitle">SudanScan</p>
+    <div class="cards">
+      <a class="card" href="/food"><i class="ti ti-soup"></i><p>Food detector</p></a>
+      <a class="card" href="/cloth"><i class="ti ti-shirt"></i><p>Cloth detector</p></a>
+    </div>
+  </div>
 </div>
 </body>
 </html>
@@ -187,20 +278,26 @@ DETECTOR_PAGE = """
 <head>
 <title>{{ title }}</title>
 <style>
-  body { font-family: Arial, sans-serif; background: #121212; color: #eee; margin: 0; padding: 40px 20px; }
-  .container { max-width: 520px; margin: 0 auto; }
-  h1 { text-align: center; margin-bottom: 4px; }
-  .subtitle { text-align: center; color: #999; font-size: 14px; margin-bottom: 24px; }
-  .back { display: block; text-align: center; color: #4ade80; margin-bottom: 20px; text-decoration: none; }
-  .upload-box { background: #1e1e1e; border: 1.5px dashed #555; border-radius: 12px; padding: 30px 20px; text-align: center; }
-  .btn { width: 100%; margin-top: 14px; background: #4ade80; color: #0a0a0a; border: none; border-radius: 8px; height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
-  .result-label { font-size: 13px; color: #999; margin: 24px 0 8px; }
-  .result-img { width: 100%; border-radius: 12px; }
-  .detections { margin-top: 16px; background: #1a1a1a; border: 0.5px solid #333; border-radius: 12px; padding: 12px 16px; }
-  .det-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid #2a2a2a; font-size: 14px; }
-  .det-coords { font-size: 11px; color: #777; margin-top: 2px; }
-  .badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; }
-  .high-conf { color: #4ade80; } .mid-conf { color: #facc15; } .low-conf { color: #f87171; }
+""" + BASE_STYLE + """
+.container { max-width: 520px; margin: 0 auto; padding: 40px 20px; }
+.back { display: block; text-align: center; color: var(--clay); margin-bottom: 20px; text-decoration: none; font-size: 13px; }
+h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--coffee); }
+.subtitle { text-align: center; color: var(--coffee-light); font-size: 14px; margin-bottom: 24px; }
+.upload-box { background: #fffaf2; border: 1.5px dashed var(--sand-dark); border-radius: 12px; padding: 30px 20px; text-align: center; }
+.upload-box i { font-size: 24px; color: var(--clay); }
+.btn { width: 100%; margin-top: 14px; background: var(--clay); color: #fff; border: none; border-radius: 8px; height: 44px; font-size: 15px; cursor: pointer; font-family: inherit; }
+.btn:hover { background: var(--clay-dark); }
+.result-label { font-size: 13px; color: var(--coffee-light); margin: 24px 0 8px; }
+.frame { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--sand-dark); }
+.result-img { width: 100%; display: block; }
+.detections { margin-top: 16px; background: #fffaf2; border: 1px solid var(--sand-dark); border-radius: 12px; padding: 12px 16px; }
+.det-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--sand); font-size: 14px; }
+.det-row:last-child { border-bottom: none; }
+.det-coords { font-size: 11px; color: var(--coffee-light); margin-top: 2px; }
+.badge { font-size: 12px; font-weight: bold; padding: 2px 10px; border-radius: 999px; }
+.high-conf { background: #e4ecd8; color: #3b6d11; }
+.mid-conf { background: #faeeda; color: #854f0b; }
+.low-conf { background: #fcebeb; color: #a32d2d; }
 </style>
 </head>
 <body>
@@ -210,13 +307,16 @@ DETECTOR_PAGE = """
   <p class="subtitle">{{ subtitle }}</p>
 
   <form method="POST" enctype="multipart/form-data">
-    <div class="upload-box"><input type="file" name="image" accept="image/*" required></div>
+    <div class="upload-box">
+      <i class="ti ti-viewfinder"></i>
+      <div><input type="file" name="image" accept="image/*" required></div>
+    </div>
     <button type="submit" class="btn">Detect</button>
   </form>
 
   {% if result_image %}
     <p class="result-label">Result</p>
-    <img class="result-img" src="data:image/jpeg;base64,{{ result_image }}">
+    <div class="frame"><img class="result-img" src="data:image/jpeg;base64,{{ result_image }}"></div>
     <div class="detections">
       <p class="result-label" style="margin:0 0 10px;">Detections</p>
       {% if detections %}
@@ -240,8 +340,6 @@ DETECTOR_PAGE = """
 """
 
 
-# ---------- ROUTES: AUTH ----------
-
 @app.get("/", response_class=HTMLResponse)
 def login_page():
     return Template(LOGIN_PAGE).render(error=None)
@@ -262,35 +360,26 @@ def signup_page():
 
 @app.post("/signup", response_class=HTMLResponse)
 def signup(username: str = Form(...), password: str = Form(...)):
-    users = load_users()
-
     if find_user(username):
         return Template(SIGNUP_PAGE).render(error="Username already taken")
-
     if len(password) < 4:
         return Template(SIGNUP_PAGE).render(error="Password must be at least 4 characters")
 
-    hashed_password = pwd_context.hash(password)
-    users.append({'username': username, 'password_hash': hashed_password})
+    users = load_users()
+    users.append({'username': username, 'password_hash': pwd_context.hash(password)})
     save_users(users)
-
     return RedirectResponse(url="/", status_code=303)
 
-
-# ---------- ROUTES: MENU ----------
 
 @app.get("/menu", response_class=HTMLResponse)
 def menu_page():
     return MENU_PAGE
 
 
-# ---------- ROUTES: FOOD DETECTOR ----------
-
 @app.get("/food", response_class=HTMLResponse)
 def food_page():
     return Template(DETECTOR_PAGE).render(
-        title="Sudanese Food Detector",
-        subtitle="Upload a photo to detect zalabia, cay, or mol5iya",
+        title="Food detector", subtitle="Upload a photo to detect zalabia, cay, or mol5iya",
         result_image=None, detections=None
     )
 
@@ -303,35 +392,25 @@ async def food_detect(image: UploadFile = File(...)):
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     image_name = f'{timestamp}_{image.filename}'
-
-    save_path = os.path.join(UPLOAD_FOLDER, image_name)
-    cv2.imwrite(save_path, img)
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, image_name), img)
 
     annotated_img, detections = run_detection(food_model, img)
-
-    annotated_name = f'{timestamp}_detected_{image.filename}'
-    annotated_path = os.path.join(UPLOAD_FOLDER, annotated_name)
-    cv2.imwrite(annotated_path, annotated_img)
-
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, f'{timestamp}_detected_{image.filename}'), annotated_img)
     save_result_to_json(image_name, 'food', detections)
 
     _, buffer = cv2.imencode('.jpg', annotated_img)
     result_image = base64.b64encode(buffer).decode('utf-8')
 
     return Template(DETECTOR_PAGE).render(
-        title="Sudanese Food Detector",
-        subtitle="Upload a photo to detect zalabia, cay, or mol5iya",
+        title="Food detector", subtitle="Upload a photo to detect zalabia, cay, or mol5iya",
         result_image=result_image, detections=detections
     )
 
 
-# ---------- ROUTES: CLOTH DETECTOR ----------
-
 @app.get("/cloth", response_class=HTMLResponse)
 def cloth_page():
     return Template(DETECTOR_PAGE).render(
-        title="Sudanese Cloth Detector",
-        subtitle="Upload a photo to detect clothing items",
+        title="Cloth detector", subtitle="Upload a photo to detect clothing items",
         result_image=None, detections=None
     )
 
@@ -344,23 +423,16 @@ async def cloth_detect(image: UploadFile = File(...)):
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     image_name = f'{timestamp}_{image.filename}'
-
-    save_path = os.path.join(UPLOAD_FOLDER, image_name)
-    cv2.imwrite(save_path, img)
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, image_name), img)
 
     annotated_img, detections = run_detection(cloth_model, img)
-
-    annotated_name = f'{timestamp}_detected_{image.filename}'
-    annotated_path = os.path.join(UPLOAD_FOLDER, annotated_name)
-    cv2.imwrite(annotated_path, annotated_img)
-
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, f'{timestamp}_detected_{image.filename}'), annotated_img)
     save_result_to_json(image_name, 'cloth', detections)
 
     _, buffer = cv2.imencode('.jpg', annotated_img)
     result_image = base64.b64encode(buffer).decode('utf-8')
 
     return Template(DETECTOR_PAGE).render(
-        title="Sudanese Cloth Detector",
-        subtitle="Upload a photo to detect clothing items",
+        title="Cloth detector", subtitle="Upload a photo to detect clothing items",
         result_image=result_image, detections=detections
     )
