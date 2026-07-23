@@ -7,13 +7,13 @@ import numpy as np
 import base64
 import os
 import json
+import tempfile
 from datetime import datetime
 from jinja2 import Template
-import tempfile
 
-os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['YOLO_CONFIG_DIR'] = tempfile.gettempdir()
+
 app = FastAPI()
-
 
 food_model = None
 cloth_model = None
@@ -33,13 +33,16 @@ def get_cloth_model():
     return cloth_model
 
 
-TEMP_DIR = tempfile.gettempdir()
+if os.environ.get('RENDER'):
+    DATA_DIR = tempfile.gettempdir()
+else:
+    DATA_DIR = '.'
 
-UPLOAD_FOLDER = os.path.join(TEMP_DIR, 'uploaded_images')
+UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploaded_images')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-RESULTS_FILE = os.path.join(TEMP_DIR, 'detection_results.json')
-USERS_FILE = os.path.join(TEMP_DIR, 'users.json')
+RESULTS_FILE = os.path.join(DATA_DIR, 'detection_results.json')
+USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -80,8 +83,18 @@ def save_result_to_json(image_name, model_type, detections):
         json.dump(all_results, f, indent=2, ensure_ascii=False)
 
 
+def resize_if_large(img, max_dimension=640):
+    h, w = img.shape[:2]
+    if max(h, w) > max_dimension:
+        scale = max_dimension / max(h, w)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = cv2.resize(img, (new_w, new_h))
+    return img
+
+
 def run_detection(model, img):
-    results = model.predict(img, conf=0.5, verbose=False)
+    img = resize_if_large(img)
+    results = model.predict(img, conf=0.5, verbose=False, device='cpu', imgsz=640)
     annotated_img = results[0].plot()
 
     detections = []
