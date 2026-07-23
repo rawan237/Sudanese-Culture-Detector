@@ -324,5 +324,34 @@
         }
       }
     ]
+  },
+  {
+    "image": "20260723_155417_20260716_170920_78e72066-638c-4096-bec9-b6cb7086fc4c.png",
+    "model": "food",
+    "timestamp": "2026-07-23 15:54:19",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 92.6,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 430.9,
+          "y1": 259.7,
+          "x2": 1432.0,
+          "y2": 975.5
+        }
+      },
+      {
+        "name": "cay",
+        "confidence": 81.8,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 89.4,
+          "y1": 119.1,
+          "x2": 475.4,
+          "y2": 664.2
+        }
+      }
+    ]
   }
 ]

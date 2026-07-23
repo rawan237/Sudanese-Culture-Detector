@@ -9,6 +9,7 @@ import os
 import json
 from datetime import datetime
 from jinja2 import Template
+import tempfile
 
 os.environ['OMP_NUM_THREADS'] = '1'
 app = FastAPI()
@@ -32,11 +33,13 @@ def get_cloth_model():
     return cloth_model
 
 
-UPLOAD_FOLDER = 'uploaded_images'
+TEMP_DIR = tempfile.gettempdir()
+
+UPLOAD_FOLDER = os.path.join(TEMP_DIR, 'uploaded_images')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-RESULTS_FILE = 'detection_results.json'
-USERS_FILE = 'users.json'
+RESULTS_FILE = os.path.join(TEMP_DIR, 'detection_results.json')
+USERS_FILE = os.path.join(TEMP_DIR, 'users.json')
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
