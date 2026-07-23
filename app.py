@@ -10,7 +10,9 @@ import json
 from datetime import datetime
 from jinja2 import Template
 
+os.environ['OMP_NUM_THREADS'] = '1'
 app = FastAPI()
+
 
 food_model = None
 cloth_model = None

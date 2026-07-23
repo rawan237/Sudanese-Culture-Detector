@@ -237,5 +237,92 @@
         }
       }
     ]
+  },
+  {
+    "image": "20260723_152933_bd202f6c-b652-4955-9ed4-5f7d99b6576f.png",
+    "model": "food",
+    "timestamp": "2026-07-23 15:29:36",
+    "detections": [
+      {
+        "name": "zalabia",
+        "confidence": 88.7,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 334.6,
+          "y1": 428.9,
+          "x2": 879.6,
+          "y2": 874.1
+        }
+      },
+      {
+        "name": "cay",
+        "confidence": 71.7,
+        "conf_class": "mid-conf",
+        "box": {
+          "x1": 893.8,
+          "y1": 630.9,
+          "x2": 1215.6,
+          "y2": 1059.2
+        }
+      }
+    ]
+  },
+  {
+    "image": "20260723_152959_9928c8aa-0493-4092-b53f-2bccb225ed08.png",
+    "model": "cloth",
+    "timestamp": "2026-07-23 15:30:00",
+    "detections": [
+      {
+        "name": "Jallabeya",
+        "confidence": 90.2,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 535.3,
+          "y1": 451.1,
+          "x2": 1003.7,
+          "y2": 1400.1
+        }
+      },
+      {
+        "name": "Thobe",
+        "confidence": 88.8,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 55.2,
+          "y1": 543.4,
+          "x2": 457.5,
+          "y2": 1402.0
+        }
+      }
+    ]
+  },
+  {
+    "image": "20260723_153806_9928c8aa-0493-4092-b53f-2bccb225ed08.png",
+    "model": "cloth",
+    "timestamp": "2026-07-23 15:38:07",
+    "detections": [
+      {
+        "name": "Jallabeya",
+        "confidence": 90.2,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 535.3,
+          "y1": 451.1,
+          "x2": 1003.7,
+          "y2": 1400.1
+        }
+      },
+      {
+        "name": "Thobe",
+        "confidence": 88.8,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 55.2,
+          "y1": 543.4,
+          "x2": 457.5,
+          "y2": 1402.0
+        }
+      }
+    ]
   }
 ]
