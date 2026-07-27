@@ -2,8 +2,11 @@ fastapi
 uvicorn
 python-multipart
 jinja2
-ultralytics
 opencv-python-headless
 numpy
 passlib
 bcrypt==3.2.2
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+ultralytics
