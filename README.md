@@ -4,7 +4,8 @@
 
 A unified web application for detecting Sudanese food items and clothing items using YOLO object detection models, built with FastAPI.
 
-
+## 🚀 Live Demo
+Try the app here: http://16.192.170.210
 
 \## Features
 
