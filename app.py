@@ -7,6 +7,7 @@ import numpy as np
 import base64
 import os
 import json
+import re
 import tempfile
 from datetime import datetime
 from jinja2 import Template
@@ -47,6 +48,11 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+def is_valid_email(email):
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+
 def load_users():
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -59,9 +65,9 @@ def save_users(users):
         json.dump(users, f, indent=2, ensure_ascii=False)
 
 
-def find_user(username):
+def find_user(email):
     for u in load_users():
-        if u['username'] == username:
+        if u['email'] == email:
             return u
     return None
 
@@ -204,7 +210,7 @@ button:hover { background: var(--clay-dark); }
     <h2>SudanScan</h2>
     <p class="subtitle">Sudanese Food & Cloth Detection System</p>
     <form method="post" action="/login">
-      <input type="text" name="username" placeholder="Username" required>
+      <input type="email" name="email" placeholder="Email" required>
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Login</button>
     </form>
@@ -252,7 +258,7 @@ button:hover { background: var(--clay-dark); }
   <div class="card">
     <h2>Create account</h2>
     <form method="post" action="/signup">
-      <input type="text" name="username" placeholder="Username" required>
+      <input type="email" name="email" placeholder="Email" required>
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Sign up</button>
     </form>
@@ -375,11 +381,11 @@ def login_page():
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login(username: str = Form(...), password: str = Form(...)):
-    user = find_user(username)
+def login(email: str = Form(...), password: str = Form(...)):
+    user = find_user(email)
     if user and pwd_context.verify(password, user['password_hash']):
         return RedirectResponse(url="/menu", status_code=303)
-    return Template(LOGIN_PAGE).render(error="Invalid username or password")
+    return Template(LOGIN_PAGE).render(error="Invalid email or password")
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -388,14 +394,17 @@ def signup_page():
 
 
 @app.post("/signup", response_class=HTMLResponse)
-def signup(username: str = Form(...), password: str = Form(...)):
-    if find_user(username):
-        return Template(SIGNUP_PAGE).render(error="Username already taken")
+def signup(email: str = Form(...), password: str = Form(...)):
+    if not is_valid_email(email):
+        return Template(SIGNUP_PAGE).render(error="Please enter a valid email address")
+
+    if find_user(email):
+        return Template(SIGNUP_PAGE).render(error="Email already registered")
     if len(password) < 4:
         return Template(SIGNUP_PAGE).render(error="Password must be at least 4 characters")
 
     users = load_users()
-    users.append({'username': username, 'password_hash': pwd_context.hash(password)})
+    users.append({'email': email, 'password_hash': pwd_context.hash(password)})
     save_users(users)
     return RedirectResponse(url="/", status_code=303)
 

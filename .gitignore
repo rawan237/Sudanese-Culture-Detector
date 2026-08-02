@@ -2,3 +2,4 @@ users.json
 __pycache__/
 TEST.JPG
 uploaded_images/
+*.pem
