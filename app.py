@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.starlette_client import OAuth
 from ultralytics import YOLO
 from passlib.context import CryptContext
 import cv2
@@ -8,13 +10,49 @@ import base64
 import os
 import json
 import re
+import random
+import smtplib
 import tempfile
+from email.mime.text import MIMEText
 from datetime import datetime
 from jinja2 import Template
 
 os.environ['YOLO_CONFIG_DIR'] = tempfile.gettempdir()
 
 app = FastAPI()
+
+# Needed so we can remember the logged-in user between requests (via a signed cookie)
+app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "change-this-secret"))
+
+# ---- Google OAuth setup ----
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'},
+)
+
+# ---- Email (Gmail SMTP) setup ----
+GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+
+def send_verification_email(to_email, code):
+    msg = MIMEText(f"Your SudanScan verification code is: {code}\n\nEnter this code on the verification page to activate your account.")
+    msg['Subject'] = 'SudanScan - Verify your email'
+    msg['From'] = GMAIL_ADDRESS
+    msg['To'] = to_email
+
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+
 
 food_model = None
 cloth_model = None
@@ -214,6 +252,8 @@ button:hover { background: var(--clay-dark); }
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Login</button>
     </form>
+    <div style="text-align:center; margin: 14px 0; color: var(--coffee-light); font-size: 12px;">or</div>
+    <a href="/auth/google" style="display:block; text-align:center; padding:11px; border-radius:8px; border:1px solid var(--sand-dark); color: var(--coffee); text-decoration:none; font-size:14px; background:#fff;">Continue with Google</a>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <p class="link">Don't have an account? <a href="/signup">Create one</a></p>
   </div>
@@ -264,6 +304,57 @@ button:hover { background: var(--clay-dark); }
     </form>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <p class="link">Already have an account? <a href="/">Login</a></p>
+  </div>
+</div>
+</body>
+</html>
+"""
+
+VERIFY_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>SudanScan - Verify email</title>
+<style>
+""" + BASE_STYLE + """
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
+.card {
+  background: #fffaf2; border: 1px solid var(--sand-dark);
+  border-top: 4px solid var(--clay); border-radius: 14px;
+  padding: 36px 32px; width: 300px; box-sizing: border-box;
+}
+h2 { text-align: center; margin: 0 0 6px; font-weight: normal; color: var(--coffee); }
+.subtitle { text-align: center; color: var(--coffee-light); font-size: 13px; margin: 0 0 20px; }
+input {
+  width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px;
+  border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee);
+  box-sizing: border-box; font-family: inherit; font-size: 20px; text-align: center;
+  letter-spacing: 6px;
+}
+input:focus { outline: none; border-color: var(--clay); }
+button {
+  width: 100%; padding: 11px; margin-top: 12px; background: var(--clay);
+  color: #fff; border: none; border-radius: 8px; font-size: 14px;
+  cursor: pointer; font-family: inherit;
+}
+button:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+.link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
+.link a { color: var(--clay); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="card">
+    <h2>Verify your email</h2>
+    <p class="subtitle">We sent a 6-digit code to {{ email }}</p>
+    <form method="post" action="/verify">
+      <input type="hidden" name="email" value="{{ email }}">
+      <input type="text" name="code" placeholder="000000" maxlength="6" required>
+      <button type="submit">Verify</button>
+    </form>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <p class="link">Didn't get a code? <a href="/resend?email={{ email }}">Resend</a></p>
   </div>
 </div>
 </body>
@@ -381,11 +472,43 @@ def login_page():
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login(email: str = Form(...), password: str = Form(...)):
+def login(request: Request, email: str = Form(...), password: str = Form(...)):
     user = find_user(email)
-    if user and pwd_context.verify(password, user['password_hash']):
+    if user and user.get('password_hash') and pwd_context.verify(password, user['password_hash']):
+        if not user.get('verified', False):
+            return RedirectResponse(url=f"/verify?email={email}", status_code=303)
+        request.session['user_email'] = email
         return RedirectResponse(url="/menu", status_code=303)
     return Template(LOGIN_PAGE).render(error="Invalid email or password")
+
+
+@app.get("/auth/google")
+async def auth_google(request: Request):
+    redirect_uri = request.url_for('auth_google_callback')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def auth_google_callback(request: Request):
+    token = await oauth.google.authorize_access_token(request)
+    user_info = token.get('userinfo')
+    email = user_info['email']
+
+    # Create the account automatically the first time this Google email logs in
+    # Google already verified the email, so mark it as verified
+    if not find_user(email):
+        users = load_users()
+        users.append({'email': email, 'password_hash': None, 'provider': 'google', 'verified': True})
+        save_users(users)
+
+    request.session['user_email'] = email
+    return RedirectResponse(url="/menu", status_code=303)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -403,10 +526,59 @@ def signup(email: str = Form(...), password: str = Form(...)):
     if len(password) < 4:
         return Template(SIGNUP_PAGE).render(error="Password must be at least 4 characters")
 
+    code = str(random.randint(100000, 999999))
     users = load_users()
-    users.append({'email': email, 'password_hash': pwd_context.hash(password)})
+    users.append({
+        'email': email,
+        'password_hash': pwd_context.hash(password),
+        'verified': False,
+        'verification_code': code
+    })
     save_users(users)
-    return RedirectResponse(url="/", status_code=303)
+
+    try:
+        send_verification_email(email, code)
+    except Exception as e:
+        print(f"Failed to send verification email: {e}")
+
+    return RedirectResponse(url=f"/verify?email={email}", status_code=303)
+
+
+@app.get("/verify", response_class=HTMLResponse)
+def verify_page(email: str):
+    return Template(VERIFY_PAGE).render(email=email, error=None)
+
+
+@app.post("/verify", response_class=HTMLResponse)
+def verify(request: Request, email: str = Form(...), code: str = Form(...)):
+    users = load_users()
+    for u in users:
+        if u['email'] == email:
+            if u.get('verification_code') == code:
+                u['verified'] = True
+                u.pop('verification_code', None)
+                save_users(users)
+                request.session['user_email'] = email
+                return RedirectResponse(url="/menu", status_code=303)
+            else:
+                return Template(VERIFY_PAGE).render(email=email, error="Incorrect code, please try again")
+    return Template(VERIFY_PAGE).render(email=email, error="Account not found")
+
+
+@app.get("/resend")
+def resend(email: str):
+    users = load_users()
+    for u in users:
+        if u['email'] == email:
+            code = str(random.randint(100000, 999999))
+            u['verification_code'] = code
+            save_users(users)
+            try:
+                send_verification_email(email, code)
+            except Exception as e:
+                print(f"Failed to resend verification email: {e}")
+            break
+    return RedirectResponse(url=f"/verify?email={email}", status_code=303)
 
 
 @app.get("/menu", response_class=HTMLResponse)
