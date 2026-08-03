@@ -11,3 +11,5 @@ torch
 torchvision
 ultralytics
 itsdangerous
+authlib
+httpx
