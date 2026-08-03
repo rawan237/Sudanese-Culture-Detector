@@ -72,10 +72,9 @@ def get_cloth_model():
     return cloth_model
 
 
-if os.environ.get('RENDER'):
-    DATA_DIR = tempfile.gettempdir()
-else:
-    DATA_DIR = '.'
+# التعديل الأساسي هنا: توجيه كل البيانات لمجلد data
+DATA_DIR = 'data'
+os.makedirs(DATA_DIR, exist_ok=True)
 
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploaded_images')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
