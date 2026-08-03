@@ -12,6 +12,8 @@ import json
 import re
 import random
 import smtplib
+import uuid
+import time
 import tempfile
 from email.mime.text import MIMEText
 from datetime import datetime
@@ -53,6 +55,18 @@ def send_verification_email(to_email, code):
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.send_message(msg)
 
+# دالة إرسال رابط استعادة كلمة المرور الجديدة
+def send_reset_email(to_email, reset_link):
+    msg = MIMEText(f"You requested to reset your password.\n\nClick the link below to set a new password:\n{reset_link}\n\nIf you did not request this, please ignore this email.")
+    msg['Subject'] = 'SudanScan - Reset Password'
+    msg['From'] = GMAIL_ADDRESS
+    msg['To'] = to_email
+
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+
 
 food_model = None
 cloth_model = None
@@ -81,6 +95,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 RESULTS_FILE = os.path.join(DATA_DIR, 'detection_results.json')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
+TOKENS_FILE = os.path.join(DATA_DIR, 'tokens.json') # ملف حفظ رموز استعادة الباسوورد
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -88,6 +103,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
+
+# دالة التحقق من قوة كلمة المرور
+def is_strong_password(password):
+    # الشروط: 8 خانات على الأقل، حرف إنجليزي كبير، حرف صغير، ورقم
+    pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&#]{8,}$'
+    return re.match(pattern, password) is not None
 
 
 def load_users():
@@ -107,6 +128,17 @@ def find_user(email):
         if u['email'] == email:
             return u
     return None
+
+# دوال التعامل مع الرموز السرية للاستعادة
+def load_tokens():
+    if os.path.exists(TOKENS_FILE):
+        with open(TOKENS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_tokens(tokens):
+    with open(TOKENS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(tokens, f, indent=2, ensure_ascii=False)
 
 
 def save_result_to_json(image_name, model_type, detections):
@@ -251,6 +283,9 @@ button:hover { background: var(--clay-dark); }
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Login</button>
     </form>
+    <div style="text-align: right; margin-top: 5px;">
+        <a href="/forgot" style="font-size: 12px; color: var(--clay); text-decoration: none;">Forgot password?</a>
+    </div>
     <div style="text-align:center; margin: 14px 0; color: var(--coffee-light); font-size: 12px;">or</div>
     <a href="/auth/google" style="display:block; text-align:center; padding:11px; border-radius:8px; border:1px solid var(--sand-dark); color: var(--coffee); text-decoration:none; font-size:14px; background:#fff;">Continue with Google</a>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -354,6 +389,80 @@ button:hover { background: var(--clay-dark); }
     </form>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <p class="link">Didn't get a code? <a href="/resend?email={{ email }}">Resend</a></p>
+  </div>
+</div>
+</body>
+</html>
+"""
+
+FORGOT_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>SudanScan - Forgot Password</title>
+<style>
+""" + BASE_STYLE + """
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
+.card { background: #fffaf2; border: 1px solid var(--sand-dark); border-top: 4px solid var(--clay); border-radius: 14px; padding: 36px 32px; width: 300px; box-sizing: border-box; }
+h2 { text-align: center; margin: 0 0 10px; font-weight: normal; color: var(--coffee); }
+p { text-align: center; font-size: 13px; color: var(--coffee-light); }
+input { width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee); box-sizing: border-box; font-family: inherit; font-size: 14px; }
+input:focus { outline: none; border-color: var(--clay); }
+button { width: 100%; padding: 11px; margin-top: 12px; background: var(--clay); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-family: inherit; }
+button:hover { background: var(--clay-dark); }
+.message { color: #3b6d11; text-align: center; font-size: 13px; margin-top: 10px; }
+.link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
+.link a { color: var(--clay); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="card">
+    <h2>Reset Password</h2>
+    <p>Enter your email to receive a reset link.</p>
+    <form method="post" action="/forgot">
+      <input type="email" name="email" placeholder="Email" required>
+      <button type="submit">Send Link</button>
+    </form>
+    {% if message %}<p class="message">{{ message }}</p>{% endif %}
+    <p class="link"><a href="/">&larr; Back to login</a></p>
+  </div>
+</div>
+</body>
+</html>
+"""
+
+RESET_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>SudanScan - New Password</title>
+<style>
+""" + BASE_STYLE + """
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
+.card { background: #fffaf2; border: 1px solid var(--sand-dark); border-top: 4px solid var(--clay); border-radius: 14px; padding: 36px 32px; width: 300px; box-sizing: border-box; }
+h2 { text-align: center; margin: 0 0 20px; font-weight: normal; color: var(--coffee); }
+input { width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee); box-sizing: border-box; font-family: inherit; font-size: 14px; }
+input:focus { outline: none; border-color: var(--clay); }
+button { width: 100%; padding: 11px; margin-top: 12px; background: var(--clay); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-family: inherit; }
+button:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="card">
+    <h2>Enter New Password</h2>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+      <p style="text-align:center;"><a href="/forgot" style="color:var(--clay);">Request a new link</a></p>
+    {% else %}
+      <form method="post" action="/reset">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="password" name="new_password" placeholder="New Password" required>
+        <button type="submit">Update Password</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 </body>
@@ -522,8 +631,10 @@ def signup(email: str = Form(...), password: str = Form(...)):
 
     if find_user(email):
         return Template(SIGNUP_PAGE).render(error="Email already registered")
-    if len(password) < 4:
-        return Template(SIGNUP_PAGE).render(error="Password must be at least 4 characters")
+        
+    # التحقق من قوة الباسوورد بدل شرط الـ 4 حروف القديم
+    if not is_strong_password(password):
+        return Template(SIGNUP_PAGE).render(error="Password must be at least 8 characters, include an uppercase letter, a lowercase letter, and a number")
 
     code = str(random.randint(100000, 999999))
     users = load_users()
@@ -579,6 +690,75 @@ def resend(email: str):
             break
     return RedirectResponse(url=f"/verify?email={email}", status_code=303)
 
+# ---- دوال استعادة كلمة المرور ----
+
+@app.get("/forgot", response_class=HTMLResponse)
+def forgot_page():
+    return Template(FORGOT_PAGE).render(message=None)
+
+@app.post("/forgot", response_class=HTMLResponse)
+def forgot_password_request(request: Request, email: str = Form(...)):
+    user = find_user(email)
+    
+    # رسالة أمنية عامة
+    success_msg = "If your email is registered, you will receive a reset link."
+    
+    if user:
+        token = str(uuid.uuid4())
+        tokens = load_tokens()
+        tokens[token] = {
+            'email': email,
+            'expires': time.time() + 3600 # الرمز صالح لمدة ساعة
+        }
+        save_tokens(tokens)
+        
+        # إنشاء الرابط باستخدام رابط موقعكم
+        reset_link = f"https://sudan-culture.duckdns.org/reset?token={token}"
+        
+        try:
+            send_reset_email(email, reset_link)
+        except Exception as e:
+            print(f"Failed to send reset email: {e}")
+        
+    return Template(FORGOT_PAGE).render(message=success_msg)
+
+@app.get("/reset", response_class=HTMLResponse)
+def reset_page(token: str):
+    tokens = load_tokens()
+    if token not in tokens or time.time() > tokens[token]['expires']:
+        return Template(RESET_PAGE).render(error="Invalid or expired reset link.", token=None)
+    
+    return Template(RESET_PAGE).render(error=None, token=token)
+
+@app.post("/reset", response_class=HTMLResponse)
+def reset_password_action(token: str = Form(...), new_password: str = Form(...)):
+    tokens = load_tokens()
+    
+    if token not in tokens or time.time() > tokens[token]['expires']:
+        return Template(RESET_PAGE).render(error="Invalid or expired reset link.", token=None)
+    
+    if not is_strong_password(new_password):
+        return Template(RESET_PAGE).render(
+            error="Password must be at least 8 characters, with 1 uppercase, 1 lowercase, and 1 number.", 
+            token=token
+        )
+    
+    email = tokens[token]['email']
+    users = load_users()
+    
+    for u in users:
+        if u['email'] == email:
+            u['password_hash'] = pwd_context.hash(new_password)
+            break
+            
+    save_users(users)
+    
+    del tokens[token]
+    save_tokens(tokens)
+    
+    return RedirectResponse(url="/", status_code=303)
+
+# -----------------------------------
 
 @app.get("/menu", response_class=HTMLResponse)
 def menu_page():
