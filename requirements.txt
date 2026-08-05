@@ -13,3 +13,4 @@ ultralytics
 itsdangerous
 authlib
 httpx
+sqlalchemy
