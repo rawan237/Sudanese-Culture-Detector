@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Request, Form, UploadFile, File
+from fastapi import FastAPI, Request, Form, UploadFile, File, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
 from ultralytics import YOLO
-from passlib.context import CryptContext
+import bcrypt
 import cv2
 import numpy as np
 import base64
@@ -19,11 +19,15 @@ from email.mime.text import MIMEText
 from datetime import datetime
 from jinja2 import Template
 
+# ----------------- Database Imports -----------------
+from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
 os.environ['YOLO_CONFIG_DIR'] = tempfile.gettempdir()
 
 app = FastAPI()
 
-# Needed so we can remember the logged-in user between requests (via a signed cookie)
 app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "change-this-secret"))
 
 # ---- Google OAuth setup ----
@@ -39,38 +43,33 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'},
 )
 
-# ---- Email (Gmail SMTP) setup ----
+# ---- Email setup ----
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-
 
 def send_verification_email(to_email, code):
     msg = MIMEText(f"Your SudanScan verification code is: {code}\n\nEnter this code on the verification page to activate your account.")
     msg['Subject'] = 'SudanScan - Verify your email'
     msg['From'] = GMAIL_ADDRESS
     msg['To'] = to_email
-
     with smtplib.SMTP('smtp.gmail.com', 587) as server:
         server.starttls()
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.send_message(msg)
 
-# دالة إرسال رابط استعادة كلمة المرور الجديدة
 def send_reset_email(to_email, reset_link):
     msg = MIMEText(f"You requested to reset your password.\n\nClick the link below to set a new password:\n{reset_link}\n\nIf you did not request this, please ignore this email.")
     msg['Subject'] = 'SudanScan - Reset Password'
     msg['From'] = GMAIL_ADDRESS
     msg['To'] = to_email
-
     with smtplib.SMTP('smtp.gmail.com', 587) as server:
         server.starttls()
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.send_message(msg)
 
-
+# ----------------- Models Setup -----------------
 food_model = None
 cloth_model = None
-
 
 def get_food_model():
     global food_model
@@ -78,68 +77,62 @@ def get_food_model():
         food_model = YOLO('Sudanese-food-detection.pt')
     return food_model
 
-
 def get_cloth_model():
     global cloth_model
     if cloth_model is None:
         cloth_model = YOLO('best.pt')
     return cloth_model
 
-
-# التعديل الأساسي هنا: توجيه كل البيانات لمجلد data
+# ----------------- Directories -----------------
 DATA_DIR = 'data'
 os.makedirs(DATA_DIR, exist_ok=True)
-
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploaded_images')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 RESULTS_FILE = os.path.join(DATA_DIR, 'detection_results.json')
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-TOKENS_FILE = os.path.join(DATA_DIR, 'tokens.json') # ملف حفظ رموز استعادة الباسوورد
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+# ----------------- Database Setup (SQLite) -----------------
+SQLALCHEMY_DATABASE_URL = "sqlite:///./data/sudanscan.db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class UserDB(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String, nullable=True) # <-- السطر دا اللي كان عامل المشكلة صلحناهو هنا
+    provider = Column(String, default="local")
+    verified = Column(Boolean, default=False)
+    verification_code = Column(String, nullable=True)
+
+class TokenDB(Base):
+    __tablename__ = "reset_tokens"
+    token = Column(String, primary_key=True, index=True)
+    email = Column(String, index=True)
+    expires = Column(Integer)
+
+# Create the database tables
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ----------------- Helper Functions -----------------
 def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-# دالة التحقق من قوة كلمة المرور
 def is_strong_password(password):
-    # الشروط: 8 خانات على الأقل، حرف إنجليزي كبير، حرف صغير، ورقم
     pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&#]{8,}$'
     return re.match(pattern, password) is not None
-
-
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return []
-
-
-def save_users(users):
-    with open(USERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
-
-
-def find_user(email):
-    for u in load_users():
-        if u['email'] == email:
-            return u
-    return None
-
-# دوال التعامل مع الرموز السرية للاستعادة
-def load_tokens():
-    if os.path.exists(TOKENS_FILE):
-        with open(TOKENS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-def save_tokens(tokens):
-    with open(TOKENS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(tokens, f, indent=2, ensure_ascii=False)
-
 
 def save_result_to_json(image_name, model_type, detections):
     record = {
@@ -157,7 +150,6 @@ def save_result_to_json(image_name, model_type, detections):
     with open(RESULTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(all_results, f, indent=2, ensure_ascii=False)
 
-
 def resize_if_large(img, max_dimension=640):
     h, w = img.shape[:2]
     if max(h, w) > max_dimension:
@@ -166,26 +158,22 @@ def resize_if_large(img, max_dimension=640):
         img = cv2.resize(img, (new_w, new_h))
     return img
 
-
 def run_detection(model, img):
     img = resize_if_large(img)
     results = model.predict(img, conf=0.5, verbose=False, device='cpu', imgsz=640)
     annotated_img = results[0].plot()
-
     detections = []
     for box in results[0].boxes:
         class_id = int(box.cls[0])
         class_name = model.names[class_id]
         confidence = float(box.conf[0]) * 100
         x1, y1, x2, y2 = box.xyxy[0].tolist()
-
         if confidence >= 80:
             conf_class = 'high-conf'
         elif confidence >= 50:
             conf_class = 'mid-conf'
         else:
             conf_class = 'low-conf'
-
         detections.append({
             'name': class_name,
             'confidence': round(confidence, 1),
@@ -195,10 +183,9 @@ def run_detection(model, img):
                 'x2': round(x2, 1), 'y2': round(y2, 1)
             }
         })
-
     return annotated_img, detections
 
-
+# ----------------- HTML Templates (Unchanged) -----------------
 BASE_STYLE = """
 :root {
   --sand: #f2e6d3;
@@ -225,7 +212,6 @@ background-image:
   repeating-linear-gradient(-45deg, rgba(74,50,34,0.04) 0 2px, transparent 2px 26px);
 """
 
-
 LOGIN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -233,39 +219,15 @@ LOGIN_PAGE = """
 <title>SudanScan - Login</title>
 <style>
 """ + BASE_STYLE + """
-.hero {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  """ + PATTERN_BG + """
-}
-.card {
-  background: #fffaf2;
-  border: 1px solid var(--sand-dark);
-  border-top: 4px solid var(--clay);
-  border-radius: 14px;
-  padding: 36px 32px;
-  width: 300px;
-  box-sizing: border-box;
-}
+.hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
+.card { background: #fffaf2; border: 1px solid var(--sand-dark); border-top: 4px solid var(--clay); border-radius: 14px; padding: 36px 32px; width: 300px; box-sizing: border-box; }
 .brand { text-align: center; margin-bottom: 6px; }
 .brand-icon { font-size: 30px; color: var(--clay); }
 h2 { text-align: center; margin: 6px 0 2px; font-weight: normal; color: var(--coffee); }
 .subtitle { text-align: center; color: var(--coffee-light); font-size: 13px; margin: 0 0 24px; }
-input {
-  width: 100%; padding: 11px 12px; margin: 8px 0;
-  border-radius: 8px; border: 1px solid var(--sand-dark);
-  background: #fff; color: var(--coffee); box-sizing: border-box;
-  font-family: inherit; font-size: 14px;
-}
+input { width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee); box-sizing: border-box; font-family: inherit; font-size: 14px; }
 input:focus { outline: none; border-color: var(--clay); }
-button {
-  width: 100%; padding: 11px; margin-top: 12px;
-  background: var(--clay); color: #fff; border: none;
-  border-radius: 8px; font-size: 14px; cursor: pointer;
-  font-family: inherit;
-}
+button { width: 100%; padding: 11px; margin-top: 12px; background: var(--clay); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-family: inherit; }
 button:hover { background: var(--clay-dark); }
 .error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
 .link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
@@ -304,23 +266,11 @@ SIGNUP_PAGE = """
 <style>
 """ + BASE_STYLE + """
 .hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
-.card {
-  background: #fffaf2; border: 1px solid var(--sand-dark);
-  border-top: 4px solid var(--clay); border-radius: 14px;
-  padding: 36px 32px; width: 300px; box-sizing: border-box;
-}
+.card { background: #fffaf2; border: 1px solid var(--sand-dark); border-top: 4px solid var(--clay); border-radius: 14px; padding: 36px 32px; width: 300px; box-sizing: border-box; }
 h2 { text-align: center; margin: 0 0 20px; font-weight: normal; color: var(--coffee); }
-input {
-  width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px;
-  border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee);
-  box-sizing: border-box; font-family: inherit; font-size: 14px;
-}
+input { width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee); box-sizing: border-box; font-family: inherit; font-size: 14px; }
 input:focus { outline: none; border-color: var(--clay); }
-button {
-  width: 100%; padding: 11px; margin-top: 12px; background: var(--clay);
-  color: #fff; border: none; border-radius: 8px; font-size: 14px;
-  cursor: pointer; font-family: inherit;
-}
+button { width: 100%; padding: 11px; margin-top: 12px; background: var(--clay); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-family: inherit; }
 button:hover { background: var(--clay-dark); }
 .error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
 .link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
@@ -352,25 +302,12 @@ VERIFY_PAGE = """
 <style>
 """ + BASE_STYLE + """
 .hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; """ + PATTERN_BG + """ }
-.card {
-  background: #fffaf2; border: 1px solid var(--sand-dark);
-  border-top: 4px solid var(--clay); border-radius: 14px;
-  padding: 36px 32px; width: 300px; box-sizing: border-box;
-}
+.card { background: #fffaf2; border: 1px solid var(--sand-dark); border-top: 4px solid var(--clay); border-radius: 14px; padding: 36px 32px; width: 300px; box-sizing: border-box; }
 h2 { text-align: center; margin: 0 0 6px; font-weight: normal; color: var(--coffee); }
 .subtitle { text-align: center; color: var(--coffee-light); font-size: 13px; margin: 0 0 20px; }
-input {
-  width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px;
-  border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee);
-  box-sizing: border-box; font-family: inherit; font-size: 20px; text-align: center;
-  letter-spacing: 6px;
-}
+input { width: 100%; padding: 11px 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--sand-dark); background: #fff; color: var(--coffee); box-sizing: border-box; font-family: inherit; font-size: 20px; text-align: center; letter-spacing: 6px; }
 input:focus { outline: none; border-color: var(--clay); }
-button {
-  width: 100%; padding: 11px; margin-top: 12px; background: var(--clay);
-  color: #fff; border: none; border-radius: 8px; font-size: 14px;
-  cursor: pointer; font-family: inherit;
-}
+button { width: 100%; padding: 11px; margin-top: 12px; background: var(--clay); color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-family: inherit; }
 button:hover { background: var(--clay-dark); }
 .error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
 .link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--coffee-light); }
@@ -481,11 +418,7 @@ MENU_PAGE = """
 h2 { font-weight: normal; margin-bottom: 6px; color: var(--coffee); }
 .subtitle { color: var(--coffee-light); font-size: 13px; margin: 0 0 28px; }
 .cards { display: flex; gap: 16px; justify-content: center; }
-a.card {
-  display: block; background: #fffaf2; border: 1px solid var(--sand-dark);
-  border-radius: 14px; padding: 32px 40px; text-decoration: none;
-  color: var(--coffee); width: 150px; transition: border-color 0.15s;
-}
+a.card { display: block; background: #fffaf2; border: 1px solid var(--sand-dark); border-radius: 14px; padding: 32px 40px; text-decoration: none; color: var(--coffee); width: 150px; transition: border-color 0.15s; }
 a.card:hover { border-color: var(--clay); }
 a.card i { font-size: 26px; color: var(--clay); }
 a.card p { margin: 12px 0 0; font-size: 14px; }
@@ -539,7 +472,6 @@ h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--c
   <a class="back" href="/menu">&larr; Back to menu</a>
   <h1>{{ title }}</h1>
   <p class="subtitle">{{ subtitle }}</p>
-
   <form method="POST" enctype="multipart/form-data">
     <div class="upload-box">
       <i class="ti ti-viewfinder"></i>
@@ -547,7 +479,6 @@ h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--c
     </div>
     <button type="submit" class="btn">Detect</button>
   </form>
-
   {% if result_image %}
     <p class="result-label">Result</p>
     <div class="frame"><img class="result-img" src="data:image/jpeg;base64,{{ result_image }}"></div>
@@ -573,168 +504,140 @@ h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--c
 </html>
 """
 
+# ----------------- Auth & User Routes -----------------
 
 @app.get("/", response_class=HTMLResponse)
 def login_page():
     return Template(LOGIN_PAGE).render(error=None)
 
-
 @app.post("/login", response_class=HTMLResponse)
-def login(request: Request, email: str = Form(...), password: str = Form(...)):
-    user = find_user(email)
-    if user and user.get('password_hash') and pwd_context.verify(password, user['password_hash']):
-        if not user.get('verified', False):
-            return RedirectResponse(url=f"/verify?email={email}", status_code=303)
+def login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(UserDB).filter(UserDB.email == email).first()
+    if user and user.password_hash and bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        # Email verification bypassed temporarily
+        # if not user.verified:
+        #     return RedirectResponse(url=f"/verify?email={email}", status_code=303)
         request.session['user_email'] = email
         return RedirectResponse(url="/menu", status_code=303)
     return Template(LOGIN_PAGE).render(error="Invalid email or password")
-
 
 @app.get("/auth/google")
 async def auth_google(request: Request):
     redirect_uri = request.url_for('auth_google_callback')
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
-
 @app.get("/auth/callback")
-async def auth_google_callback(request: Request):
+async def auth_google_callback(request: Request, db: Session = Depends(get_db)):
     token = await oauth.google.authorize_access_token(request)
     user_info = token.get('userinfo')
     email = user_info['email']
-
-    # Create the account automatically the first time this Google email logs in
-    # Google already verified the email, so mark it as verified
-    if not find_user(email):
-        users = load_users()
-        users.append({'email': email, 'password_hash': None, 'provider': 'google', 'verified': True})
-        save_users(users)
-
+    user = db.query(UserDB).filter(UserDB.email == email).first()
+    if not user:
+        new_user = UserDB(email=email, password_hash=None, provider='google', verified=True)
+        db.add(new_user)
+        db.commit()
     request.session['user_email'] = email
     return RedirectResponse(url="/menu", status_code=303)
-
 
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/", status_code=303)
 
-
 @app.get("/signup", response_class=HTMLResponse)
 def signup_page():
     return Template(SIGNUP_PAGE).render(error=None)
 
-
 @app.post("/signup", response_class=HTMLResponse)
-def signup(email: str = Form(...), password: str = Form(...)):
+def signup(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     if not is_valid_email(email):
         return Template(SIGNUP_PAGE).render(error="Please enter a valid email address")
-
-    if find_user(email):
+    
+    if db.query(UserDB).filter(UserDB.email == email).first():
         return Template(SIGNUP_PAGE).render(error="Email already registered")
         
-    # التحقق من قوة الباسوورد بدل شرط الـ 4 حروف القديم
     if not is_strong_password(password):
         return Template(SIGNUP_PAGE).render(error="Password must be at least 8 characters, include an uppercase letter, a lowercase letter, and a number")
-
-    code = str(random.randint(100000, 999999))
-    users = load_users()
-    users.append({
-        'email': email,
-        'password_hash': pwd_context.hash(password),
-        'verified': False,
-        'verification_code': code
-    })
-    save_users(users)
-
-    try:
-        send_verification_email(email, code)
-    except Exception as e:
-        print(f"Failed to send verification email: {e}")
-
-    return RedirectResponse(url=f"/verify?email={email}", status_code=303)
-
+    
+    new_user = UserDB(
+        email=email,
+        password_hash=bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
+        verified=True # Bypassed verification
+    )
+    db.add(new_user)
+    db.commit()
+    
+    # Redirecting straight to login instead of verify page
+    return RedirectResponse(url=f"/", status_code=303)
 
 @app.get("/verify", response_class=HTMLResponse)
 def verify_page(email: str):
     return Template(VERIFY_PAGE).render(email=email, error=None)
 
-
 @app.post("/verify", response_class=HTMLResponse)
-def verify(request: Request, email: str = Form(...), code: str = Form(...)):
-    users = load_users()
-    for u in users:
-        if u['email'] == email:
-            if u.get('verification_code') == code:
-                u['verified'] = True
-                u.pop('verification_code', None)
-                save_users(users)
-                request.session['user_email'] = email
-                return RedirectResponse(url="/menu", status_code=303)
-            else:
-                return Template(VERIFY_PAGE).render(email=email, error="Incorrect code, please try again")
+def verify(request: Request, email: str = Form(...), code: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(UserDB).filter(UserDB.email == email).first()
+    if user:
+        if user.verification_code == code:
+            user.verified = True
+            user.verification_code = None
+            db.commit()
+            request.session['user_email'] = email
+            return RedirectResponse(url="/menu", status_code=303)
+        else:
+            return Template(VERIFY_PAGE).render(email=email, error="Incorrect code, please try again")
     return Template(VERIFY_PAGE).render(email=email, error="Account not found")
 
-
 @app.get("/resend")
-def resend(email: str):
-    users = load_users()
-    for u in users:
-        if u['email'] == email:
-            code = str(random.randint(100000, 999999))
-            u['verification_code'] = code
-            save_users(users)
-            try:
-                send_verification_email(email, code)
-            except Exception as e:
-                print(f"Failed to resend verification email: {e}")
-            break
+def resend(email: str, db: Session = Depends(get_db)):
+    user = db.query(UserDB).filter(UserDB.email == email).first()
+    if user:
+        code = str(random.randint(100000, 999999))
+        user.verification_code = code
+        db.commit()
+        try:
+            send_verification_email(email, code)
+        except Exception as e:
+            print(f"Failed to resend verification email: {e}")
     return RedirectResponse(url=f"/verify?email={email}", status_code=303)
 
-# ---- دوال استعادة كلمة المرور ----
+# ----------------- Password Reset Routes -----------------
 
 @app.get("/forgot", response_class=HTMLResponse)
 def forgot_page():
     return Template(FORGOT_PAGE).render(message=None)
 
 @app.post("/forgot", response_class=HTMLResponse)
-def forgot_password_request(request: Request, email: str = Form(...)):
-    user = find_user(email)
-    
-    # رسالة أمنية عامة
+def forgot_password_request(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(UserDB).filter(UserDB.email == email).first()
     success_msg = "If your email is registered, you will receive a reset link."
-    
     if user:
-        token = str(uuid.uuid4())
-        tokens = load_tokens()
-        tokens[token] = {
-            'email': email,
-            'expires': time.time() + 3600 # الرمز صالح لمدة ساعة
-        }
-        save_tokens(tokens)
-        
-        # إنشاء الرابط باستخدام رابط موقعكم
-        reset_link = f"https://sudan-culture.duckdns.org/reset?token={token}"
-        
+        token_str = str(uuid.uuid4())
+        new_token = TokenDB(
+            token=token_str,
+            email=email,
+            expires=int(time.time()) + 3600
+        )
+        db.add(new_token)
+        db.commit()
+        reset_link = f"https://sudan-culture.duckdns.org/reset?token={token_str}"
         try:
             send_reset_email(email, reset_link)
         except Exception as e:
             print(f"Failed to send reset email: {e}")
-        
     return Template(FORGOT_PAGE).render(message=success_msg)
 
 @app.get("/reset", response_class=HTMLResponse)
-def reset_page(token: str):
-    tokens = load_tokens()
-    if token not in tokens or time.time() > tokens[token]['expires']:
+def reset_page(token: str, db: Session = Depends(get_db)):
+    db_token = db.query(TokenDB).filter(TokenDB.token == token).first()
+    if not db_token or time.time() > db_token.expires:
         return Template(RESET_PAGE).render(error="Invalid or expired reset link.", token=None)
-    
     return Template(RESET_PAGE).render(error=None, token=token)
 
 @app.post("/reset", response_class=HTMLResponse)
-def reset_password_action(token: str = Form(...), new_password: str = Form(...)):
-    tokens = load_tokens()
-    
-    if token not in tokens or time.time() > tokens[token]['expires']:
+def reset_password_action(token: str = Form(...), new_password: str = Form(...), db: Session = Depends(get_db)):
+    db_token = db.query(TokenDB).filter(TokenDB.token == token).first()
+    if not db_token or time.time() > db_token.expires:
         return Template(RESET_PAGE).render(error="Invalid or expired reset link.", token=None)
     
     if not is_strong_password(new_password):
@@ -742,28 +645,18 @@ def reset_password_action(token: str = Form(...), new_password: str = Form(...))
             error="Password must be at least 8 characters, with 1 uppercase, 1 lowercase, and 1 number.", 
             token=token
         )
-    
-    email = tokens[token]['email']
-    users = load_users()
-    
-    for u in users:
-        if u['email'] == email:
-            u['password_hash'] = pwd_context.hash(new_password)
-            break
-            
-    save_users(users)
-    
-    del tokens[token]
-    save_tokens(tokens)
-    
+    user = db.query(UserDB).filter(UserDB.email == db_token.email).first()
+    if user:
+        user.password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        db.delete(db_token)
+        db.commit()
     return RedirectResponse(url="/", status_code=303)
 
-# -----------------------------------
+# ----------------- Application Routes -----------------
 
 @app.get("/menu", response_class=HTMLResponse)
 def menu_page():
     return MENU_PAGE
-
 
 @app.get("/food", response_class=HTMLResponse)
 def food_page():
@@ -772,29 +665,23 @@ def food_page():
         result_image=None, detections=None
     )
 
-
 @app.post("/food", response_class=HTMLResponse)
 async def food_detect(image: UploadFile = File(...)):
     contents = await image.read()
     file_bytes = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     image_name = f'{timestamp}_{image.filename}'
     cv2.imwrite(os.path.join(UPLOAD_FOLDER, image_name), img)
-
     annotated_img, detections = run_detection(get_food_model(), img)
     cv2.imwrite(os.path.join(UPLOAD_FOLDER, f'{timestamp}_detected_{image.filename}'), annotated_img)
     save_result_to_json(image_name, 'food', detections)
-
     _, buffer = cv2.imencode('.jpg', annotated_img)
     result_image = base64.b64encode(buffer).decode('utf-8')
-
     return Template(DETECTOR_PAGE).render(
         title="Food detector", subtitle="Upload a photo to detect zalabia, cay, or mol5iya",
         result_image=result_image, detections=detections
     )
-
 
 @app.get("/cloth", response_class=HTMLResponse)
 def cloth_page():
@@ -803,24 +690,19 @@ def cloth_page():
         result_image=None, detections=None
     )
 
-
 @app.post("/cloth", response_class=HTMLResponse)
 async def cloth_detect(image: UploadFile = File(...)):
     contents = await image.read()
     file_bytes = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     image_name = f'{timestamp}_{image.filename}'
     cv2.imwrite(os.path.join(UPLOAD_FOLDER, image_name), img)
-
     annotated_img, detections = run_detection(get_cloth_model(), img)
     cv2.imwrite(os.path.join(UPLOAD_FOLDER, f'{timestamp}_detected_{image.filename}'), annotated_img)
     save_result_to_json(image_name, 'cloth', detections)
-
     _, buffer = cv2.imencode('.jpg', annotated_img)
     result_image = base64.b64encode(buffer).decode('utf-8')
-
     return Template(DETECTOR_PAGE).render(
         title="Cloth detector", subtitle="Upload a photo to detect clothing items",
         result_image=result_image, detections=detections

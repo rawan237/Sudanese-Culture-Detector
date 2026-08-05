@@ -1,0 +1,20 @@
+[
+  {
+    "image": "20260805_162549_20260716_161122_molokhiya.jpeg",
+    "model": "food",
+    "timestamp": "2026-08-05 16:26:11",
+    "detections": [
+      {
+        "name": "mol5iya",
+        "confidence": 95.0,
+        "conf_class": "high-conf",
+        "box": {
+          "x1": 86.1,
+          "y1": 307.7,
+          "x2": 414.0,
+          "y2": 527.4
+        }
+      }
+    ]
+  }
+]
