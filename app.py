@@ -514,9 +514,8 @@ def login_page():
 def login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(UserDB).filter(UserDB.email == email).first()
     if user and user.password_hash and bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
-        # Email verification bypassed temporarily
-        # if not user.verified:
-        #     return RedirectResponse(url=f"/verify?email={email}", status_code=303)
+        if not user.verified:
+            return RedirectResponse(url=f"/verify?email={email}", status_code=303)
         request.session['user_email'] = email
         return RedirectResponse(url="/menu", status_code=303)
     return Template(LOGIN_PAGE).render(error="Invalid email or password")
@@ -562,13 +561,21 @@ def signup(email: str = Form(...), password: str = Form(...), db: Session = Depe
     new_user = UserDB(
         email=email,
         password_hash=bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
-        verified=True # Bypassed verification
+        verified=False
     )
     db.add(new_user)
     db.commit()
     
-    # Redirecting straight to login instead of verify page
-    return RedirectResponse(url=f"/", status_code=303)
+    code = str(random.randint(100000, 999999))
+    new_user.verification_code = code
+    db.commit()
+
+    try:
+        send_verification_email(email, code)
+    except Exception as e:
+        print(f"Failed to send verification email: {e}")
+
+    return RedirectResponse(url=f"/verify?email={email}", status_code=303)
 
 @app.get("/verify", response_class=HTMLResponse)
 def verify_page(email: str):
