@@ -89,6 +89,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploaded_images')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 RESULTS_FILE = os.path.join(DATA_DIR, 'detection_results.json')
+CUSTOM_MODELS_FOLDER = os.path.join(DATA_DIR, 'custom_models')
+os.makedirs(CUSTOM_MODELS_FOLDER, exist_ok=True)
+MAX_MODEL_SIZE_MB = 50
+MAX_MODEL_SIZE_BYTES = MAX_MODEL_SIZE_MB * 1024 * 1024
 
 
 # ----------------- Database Setup (SQLite) -----------------
@@ -104,7 +108,7 @@ class UserDB(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
-    password_hash = Column(String, nullable=True) # <-- السطر دا اللي كان عامل المشكلة صلحناهو هنا
+    password_hash = Column(String, nullable=True)
     provider = Column(String, default="local")
     verified = Column(Boolean, default=False)
     verification_code = Column(String, nullable=True)
@@ -114,6 +118,14 @@ class TokenDB(Base):
     token = Column(String, primary_key=True, index=True)
     email = Column(String, index=True)
     expires = Column(Integer)
+
+class CustomModelDB(Base):
+    __tablename__ = "custom_models"
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, index=True)
+    filename = Column(String)
+    filepath = Column(String)
+    uploaded_at = Column(String)
 
 # Create the database tables
 Base.metadata.create_all(bind=engine)
@@ -432,6 +444,7 @@ a.card p { margin: 12px 0 0; font-size: 14px; }
     <div class="cards">
       <a class="card" href="/food"><i class="ti ti-soup"></i><p>Food detector</p></a>
       <a class="card" href="/cloth"><i class="ti ti-shirt"></i><p>Cloth detector</p></a>
+      <a class="card" href="/custom"><i class="ti ti-upload"></i><p>Custom model</p></a>
     </div>
   </div>
 </div>
@@ -479,6 +492,132 @@ h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--c
     </div>
     <button type="submit" class="btn">Detect</button>
   </form>
+  {% if result_image %}
+    <p class="result-label">Result</p>
+    <div class="frame"><img class="result-img" src="data:image/jpeg;base64,{{ result_image }}"></div>
+    <div class="detections">
+      <p class="result-label" style="margin:0 0 10px;">Detections</p>
+      {% if detections %}
+        {% for d in detections %}
+          <div class="det-row">
+            <div>
+              <div>{{ d.name }}</div>
+              <div class="det-coords">x1:{{ d.box.x1 }} y1:{{ d.box.y1 }} x2:{{ d.box.x2 }} y2:{{ d.box.y2 }}</div>
+            </div>
+            <span class="badge {{ d.conf_class }}">{{ d.confidence }}%</span>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="det-row"><span>No items detected</span></div>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+</body>
+</html>
+"""
+
+CUSTOM_LIST_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>SudanScan - Custom Model</title>
+<style>
+""" + BASE_STYLE + """
+.container { max-width: 520px; margin: 0 auto; padding: 40px 20px; }
+.back { display: block; text-align: center; color: var(--clay); margin-bottom: 20px; text-decoration: none; font-size: 13px; }
+h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--coffee); }
+.subtitle { text-align: center; color: var(--coffee-light); font-size: 14px; margin-bottom: 24px; }
+.upload-box { background: #fffaf2; border: 1.5px dashed var(--sand-dark); border-radius: 12px; padding: 30px 20px; text-align: center; }
+.upload-box i { font-size: 24px; color: var(--clay); }
+.btn { width: 100%; margin-top: 14px; background: var(--clay); color: #fff; border: none; border-radius: 8px; height: 44px; font-size: 15px; cursor: pointer; font-family: inherit; }
+.btn:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+.hint { text-align: center; color: var(--coffee-light); font-size: 12px; margin-top: 8px; }
+.model-list { margin-top: 24px; }
+.model-row { display: flex; justify-content: space-between; align-items: center; background: #fffaf2; border: 1px solid var(--sand-dark); border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
+.model-row a.use-btn { background: var(--clay); color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; }
+.model-name { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="/menu">&larr; Back to menu</a>
+  <h1>Custom model</h1>
+  <p class="subtitle">Upload your own YOLO (.pt) detection model</p>
+
+  <form method="POST" action="/custom/upload" enctype="multipart/form-data">
+    <div class="upload-box">
+      <i class="ti ti-upload"></i>
+      <div><input type="file" name="model_file" accept=".pt" required></div>
+    </div>
+    <button type="submit" class="btn">Upload model</button>
+    <p class="hint">Max file size: {{ max_size_mb }} MB &middot; .pt files only &middot; Detection models only</p>
+  </form>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  {% if models %}
+  <div class="model-list">
+    <p class="hint" style="text-align:left; margin-bottom:8px;">Available models</p>
+    {% for m in models %}
+    <div class="model-row">
+      <span class="model-name">{{ m.filename }}<br><small style="color:var(--coffee-light); font-size:11px;">by {{ m.user_email }}</small></span>
+      <a class="use-btn" href="/custom/{{ m.id }}">Use</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+</body>
+</html>
+"""
+
+CUSTOM_DETECT_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+<title>Custom model detector</title>
+<style>
+""" + BASE_STYLE + """
+.container { max-width: 520px; margin: 0 auto; padding: 40px 20px; }
+.back { display: block; text-align: center; color: var(--clay); margin-bottom: 20px; text-decoration: none; font-size: 13px; }
+h1 { text-align: center; margin-bottom: 4px; font-weight: normal; color: var(--coffee); }
+.subtitle { text-align: center; color: var(--coffee-light); font-size: 14px; margin-bottom: 24px; }
+.upload-box { background: #fffaf2; border: 1.5px dashed var(--sand-dark); border-radius: 12px; padding: 30px 20px; text-align: center; }
+.upload-box i { font-size: 24px; color: var(--clay); }
+.btn { width: 100%; margin-top: 14px; background: var(--clay); color: #fff; border: none; border-radius: 8px; height: 44px; font-size: 15px; cursor: pointer; font-family: inherit; }
+.btn:hover { background: var(--clay-dark); }
+.error { color: #a3372d; text-align: center; font-size: 13px; margin-top: 10px; }
+.result-label { font-size: 13px; color: var(--coffee-light); margin: 24px 0 8px; }
+.frame { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--sand-dark); }
+.result-img { width: 100%; display: block; }
+.detections { margin-top: 16px; background: #fffaf2; border: 1px solid var(--sand-dark); border-radius: 12px; padding: 12px 16px; }
+.det-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--sand); font-size: 14px; }
+.det-row:last-child { border-bottom: none; }
+.det-coords { font-size: 11px; color: var(--coffee-light); margin-top: 2px; }
+.badge { font-size: 12px; font-weight: bold; padding: 2px 10px; border-radius: 999px; }
+.high-conf { background: #e4ecd8; color: #3b6d11; }
+.mid-conf { background: #faeeda; color: #854f0b; }
+.low-conf { background: #fcebeb; color: #a32d2d; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="/custom">&larr; Back to your models</a>
+  <h1>{{ filename }}</h1>
+  <p class="subtitle">Upload a photo to test this model</p>
+
+  <form method="POST" enctype="multipart/form-data">
+    <div class="upload-box">
+      <i class="ti ti-viewfinder"></i>
+      <div><input type="file" name="image" accept="image/*" required></div>
+    </div>
+    <button type="submit" class="btn">Detect</button>
+  </form>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
   {% if result_image %}
     <p class="result-label">Result</p>
     <div class="frame"><img class="result-img" src="data:image/jpeg;base64,{{ result_image }}"></div>
@@ -714,3 +853,97 @@ async def cloth_detect(image: UploadFile = File(...)):
         title="Cloth detector", subtitle="Upload a photo to detect clothing items",
         result_image=result_image, detections=detections
     )
+
+# ----------------- Custom Model Routes -----------------
+
+@app.get("/custom", response_class=HTMLResponse)
+def custom_models_page(request: Request, db: Session = Depends(get_db)):
+    email = request.session.get('user_email')
+    if not email:
+        return RedirectResponse(url="/", status_code=303)
+    models = db.query(CustomModelDB).all()
+    return Template(CUSTOM_LIST_PAGE).render(models=models, error=None, max_size_mb=MAX_MODEL_SIZE_MB)
+
+
+@app.post("/custom/upload", response_class=HTMLResponse)
+async def custom_model_upload(request: Request, model_file: UploadFile = File(...), db: Session = Depends(get_db)):
+    email = request.session.get('user_email')
+    if not email:
+        return RedirectResponse(url="/", status_code=303)
+
+    models = db.query(CustomModelDB).all()
+
+    if not model_file.filename or not model_file.filename.lower().endswith('.pt'):
+        return Template(CUSTOM_LIST_PAGE).render(models=models, error="Only .pt files are allowed", max_size_mb=MAX_MODEL_SIZE_MB)
+
+    contents = await model_file.read()
+    if len(contents) > MAX_MODEL_SIZE_BYTES:
+        return Template(CUSTOM_LIST_PAGE).render(models=models, error=f"File too large. Max size is {MAX_MODEL_SIZE_MB}MB", max_size_mb=MAX_MODEL_SIZE_MB)
+
+    safe_name = f"{uuid.uuid4().hex}.pt"
+    save_path = os.path.join(CUSTOM_MODELS_FOLDER, safe_name)
+    with open(save_path, 'wb') as f:
+        f.write(contents)
+
+    try:
+        test_model = YOLO(save_path)
+        if getattr(test_model, 'task', None) != 'detect':
+            os.remove(save_path)
+            return Template(CUSTOM_LIST_PAGE).render(models=models, error="Only YOLO detection models are supported", max_size_mb=MAX_MODEL_SIZE_MB)
+    except Exception:
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        return Template(CUSTOM_LIST_PAGE).render(models=models, error="Could not load this file as a valid YOLO model", max_size_mb=MAX_MODEL_SIZE_MB)
+
+    new_model = CustomModelDB(
+        user_email=email,
+        filename=model_file.filename,
+        filepath=save_path,
+        uploaded_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    )
+    db.add(new_model)
+    db.commit()
+
+    return RedirectResponse(url="/custom", status_code=303)
+
+
+@app.get("/custom/{model_id}", response_class=HTMLResponse)
+def custom_detect_page(model_id: int, request: Request, db: Session = Depends(get_db)):
+    email = request.session.get('user_email')
+    if not email:
+        return RedirectResponse(url="/", status_code=303)
+    model_record = db.query(CustomModelDB).filter(CustomModelDB.id == model_id).first()
+    if not model_record:
+        return RedirectResponse(url="/custom", status_code=303)
+    return Template(CUSTOM_DETECT_PAGE).render(filename=model_record.filename, result_image=None, detections=None, error=None)
+
+
+@app.post("/custom/{model_id}", response_class=HTMLResponse)
+async def custom_detect_run(model_id: int, request: Request, image: UploadFile = File(...), db: Session = Depends(get_db)):
+    email = request.session.get('user_email')
+    if not email:
+        return RedirectResponse(url="/", status_code=303)
+    model_record = db.query(CustomModelDB).filter(CustomModelDB.id == model_id).first()
+    if not model_record:
+        return RedirectResponse(url="/custom", status_code=303)
+
+    contents = await image.read()
+    file_bytes = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+    try:
+        custom_model = YOLO(model_record.filepath)
+        annotated_img, detections = run_detection(custom_model, img)
+    except Exception:
+        return Template(CUSTOM_DETECT_PAGE).render(filename=model_record.filename, result_image=None, detections=None, error="This model could not process the image.")
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    image_name = f'{timestamp}_{image.filename}'
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, image_name), img)
+    cv2.imwrite(os.path.join(UPLOAD_FOLDER, f'{timestamp}_detected_{image.filename}'), annotated_img)
+    save_result_to_json(image_name, f'custom:{model_record.filename}', detections)
+
+    _, buffer = cv2.imencode('.jpg', annotated_img)
+    result_image = base64.b64encode(buffer).decode('utf-8')
+
+    return Template(CUSTOM_DETECT_PAGE).render(filename=model_record.filename, result_image=result_image, detections=detections, error=None)
